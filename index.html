@@ -18,6 +18,9 @@
     <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- PapaParse for CSV -->
+    <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -215,30 +218,81 @@
                 };
             }, []);
 
-            // Handle File Uploads
+            // Handle File Uploads (Supports CSV and JSON)
             const handleFileUpload = (e, type) => {
                 const file = e.target.files[0];
                 if (!file) return;
 
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    try {
-                        const rawData = JSON.parse(event.target.result);
-                        
-                        // Process data with pseudo-geocoding
-                        const processedData = rawData.map(item => {
-                            const location = pseudoGeocode(item.address || item.clinic_address || item.client_address || "");
-                            return { ...item, ...location };
-                        });
+                const processData = (rawData) => {
+                    // Process data with pseudo-geocoding
+                    const processedData = rawData.map(item => {
+                        const location = pseudoGeocode(item.address || item.clinic_address || item.client_address || "");
+                        return { ...item, ...location };
+                    });
 
-                        if (type === 'clinics') setClinics(processedData);
-                        if (type === 'clients') setClients(processedData);
-
-                    } catch (error) {
-                        alert("Error parsing JSON: " + error.message);
-                    }
+                    if (type === 'clinics') setClinics(processedData);
+                    if (type === 'clients') setClients(processedData);
                 };
-                reader.readAsText(file);
+
+                // Check file type
+                if (file.name.endsWith('.csv')) {
+                    Papa.parse(file, {
+                        header: true,
+                        skipEmptyLines: true,
+                        quoteChar: '"', // Explicitly handle quoted fields containing commas
+                        complete: (results) => {
+                            if (results.data && results.data.length > 0) {
+                                processData(results.data);
+                            } else {
+                                alert("CSV is empty or invalid.");
+                            }
+                        },
+                        error: (err) => {
+                            alert("Error parsing CSV: " + err.message);
+                        }
+                    });
+                } else {
+                    // Fallback to JSON
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            const rawData = JSON.parse(event.target.result);
+                            processData(rawData);
+                        } catch (error) {
+                            alert("Error parsing JSON: " + error.message);
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            };
+
+            // Download Template Function
+            const downloadTemplate = (type) => {
+                let csvContent = "";
+                let filename = "";
+
+                if (type === 'clinics') {
+                    // CSV Header + Sample Row for Clinics (Updated with quoted address example)
+                    csvContent = 'clinic_name,clinic_code,clinic_address,clinic_tier\nSample Clinic,C999,"Shop 101, Central Market, Central",Gold\nAnother Clinic,C888,Shatin Plaza,Silver';
+                    filename = "clinics_template.csv";
+                } else {
+                    // CSV Header + Sample Row for Clients (Updated with quoted address example)
+                    csvContent = 'client_no,client_name,client_address,no_of_employee\nCL001,Sample Client Corp,"Level 5, Langham Place, Mong Kok",100\nCL002,Tech Start,Science Park,50';
+                    filename = "clients_template.csv";
+                }
+
+                // Create blob and download link
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                if (link.download !== undefined) {
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", filename);
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
             };
 
             // Load Sample Data
@@ -263,7 +317,7 @@
                 // --- Render Clinics ---
                 clinics.forEach(clinic => {
                     // Filter Logic
-                    const tier = clinic.tier || "Other";
+                    const tier = clinic.tier || clinic.clinic_tier || "Other";
                     const showTier = filters.tiers[tier] !== false && (tier in filters.tiers ? filters.tiers[tier] : filters.tiers.Other);
                     const showRegion = filters.regions[clinic.region];
 
@@ -404,15 +458,23 @@
                             {/* Data Upload Section */}
                             <div className="space-y-4">
                                 <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                                    <i data-lucide="upload-cloud" className="w-4 h-4"></i> Data Import
+                                    <i data-lucide="upload-cloud" className="w-4 h-4"></i> Data Import (CSV / JSON)
                                 </h2>
                                 
                                 <div className="space-y-3">
                                     <div>
-                                        <label className="block text-xs font-medium text-gray-700 mb-1">Clinics JSON List</label>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <label className="text-xs font-medium text-gray-700">Clinics (CSV/JSON)</label>
+                                            <button 
+                                                onClick={() => downloadTemplate('clinics')}
+                                                className="text-xs text-blue-600 hover:text-blue-800 underline flex items-center gap-1"
+                                            >
+                                                Download Template
+                                            </button>
+                                        </div>
                                         <input 
                                             type="file" 
-                                            accept=".json"
+                                            accept=".csv, .json"
                                             onChange={(e) => handleFileUpload(e, 'clinics')}
                                             className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 transition-colors"
                                         />
@@ -423,10 +485,18 @@
                                     </div>
 
                                     <div>
-                                        <label className="block text-xs font-medium text-gray-700 mb-1">Clients JSON List</label>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <label className="text-xs font-medium text-gray-700">Clients (CSV/JSON)</label>
+                                            <button 
+                                                onClick={() => downloadTemplate('clients')}
+                                                className="text-xs text-red-600 hover:text-red-800 underline flex items-center gap-1"
+                                            >
+                                                Download Template
+                                            </button>
+                                        </div>
                                         <input 
                                             type="file" 
-                                            accept=".json"
+                                            accept=".csv, .json"
                                             onChange={(e) => handleFileUpload(e, 'clients')}
                                             className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100 transition-colors"
                                         />
